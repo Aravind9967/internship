@@ -98,10 +98,4 @@ View the image
 Specialist submits result
 
 
-Author
-Aravind
 
-GitHub: Aravind9967
-text---
-
-Would you like me to also add a section for **Postman Collection** or **Screenshots** in the README?

@@ -1,9 +1,12 @@
 package com.telehealth.screening.Services;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -31,25 +34,23 @@ public class ScreeningService {
     private final AiClassifierClient aiClassifierClient;
     private final EscalationService escalationService;
 
+    @Value("${screening.image.storage-dir}")
+    private String storageDir;
+
     //-----------------POST /screening/upload --------------
-
-
     @Transactional
     public Screening upload(Long patientId, Long nurseId, MultipartFile image) {
 
-        // 1. Calculate image hash
         String imageHash = imageStorageService.calculateHash(image);
 
-        // 2. Check for duplicate picture
         if (screeningRepository.findByImageHash(imageHash).isPresent()) {
             throw new BadRequestException("Duplicate picture not allowed. This image has already been uploaded.");
         }
 
-        // 3. Check if same patient + same nurse already has an active screening
         boolean hasActiveScreening = screeningRepository.existsByPatientIdAndNurseIdAndStatusIn(
-                patientId,                                          
-                nurseId,                                            
-                List.of(                                            
+                patientId,
+                nurseId,
+                List.of(
                         ScreeningStatus.UPLOADED,
                         ScreeningStatus.CLASSIFIED,
                         ScreeningStatus.WITH_SPECIALIST
@@ -61,10 +62,8 @@ public class ScreeningService {
                     "This nurse already has an active screening for this patient. Please complete the previous one first.");
         }
 
-        // 4. Store image
         String imageRef = imageStorageService.store(image);
 
-        // 5. Save screening
         Screening screening = screeningRepository.save(Screening.builder()
                 .patientId(patientId)
                 .nurseId(nurseId)
@@ -77,6 +76,7 @@ public class ScreeningService {
 
         return screening;
     }
+
     // --------- POST /screening/{id}/classify--------------
     @Transactional
     public ClassifyResponse classify(Long id) {
@@ -161,7 +161,6 @@ public class ScreeningService {
             default -> throw new IllegalArgumentException("Invalid decision: " + request.getDecision());
         }
 
-        // Close its escalation ticket so it leaves the queue
         escalationService.getQueue(
                 com.telehealth.screening.enums.EscalationType.SCREENING)
             .stream()
@@ -181,19 +180,31 @@ public class ScreeningService {
         return imageStorageService.retrieve(getOrThrow(screeningId).getImageRef());
     }
 
-    // ========== NEW METHOD ==========
+    // ========== FIXED METHOD ==========
     public String getImageContentType(Long screeningId) {
         Screening screening = getOrThrow(screeningId);
         String imageRef = screening.getImageRef();
 
-        if (imageRef == null) return "image/jpeg";
+        if (imageRef == null) return "application/octet-stream";
+
+        // Prefer OS-level probing — it reads actual file magic bytes, not just the name
+        try {
+            Path path = Path.of(storageDir).resolve(imageRef).normalize();
+            String probed = Files.probeContentType(path);
+            if (probed != null) return probed;
+        } catch (Exception e) {
+            log.warn("Could not probe content type for {}, falling back to extension match", imageRef);
+        }
 
         String lower = imageRef.toLowerCase();
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".png"))  return "image/png";
+        if (lower.endsWith(".gif"))  return "image/gif";
         if (lower.endsWith(".webp")) return "image/webp";
-        if (lower.endsWith(".bmp")) return "image/bmp";
-        return "image/jpeg"; // default
+        if (lower.endsWith(".bmp"))  return "image/bmp";
+        if (lower.endsWith(".avif")) return "image/avif";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+
+        return "application/octet-stream"; 
     }
 
     public Screening getOrThrow(Long id) {

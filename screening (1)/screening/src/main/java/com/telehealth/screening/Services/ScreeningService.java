@@ -47,9 +47,9 @@ public class ScreeningService {
 
         // 3. Check if same patient + same nurse already has an active screening
         boolean hasActiveScreening = screeningRepository.existsByPatientIdAndNurseIdAndStatusIn(
-                patientId,                                          // 1st argument
-                nurseId,                                            // 2nd argument
-                List.of(                                            // 3rd argument
+                patientId,                                          
+                nurseId,                                            
+                List.of(                                            
                         ScreeningStatus.UPLOADED,
                         ScreeningStatus.CLASSIFIED,
                         ScreeningStatus.WITH_SPECIALIST
